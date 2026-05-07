@@ -1,0 +1,10 @@
+# Environment
+.env
+
+# Dependencies
+api/node_modules/
+
+# AI-generated images (large files, not for version control)
+frontend/images/generated/*.png
+frontend/images/generated/*.jpg
+frontend/images/generated/*.webp
