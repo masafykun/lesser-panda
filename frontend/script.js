@@ -1,283 +1,313 @@
-// ── Particle background ──────────────────────────────────────
-const canvas = document.getElementById('particleCanvas');
-const ctx = canvas.getContext('2d');
-let particles = [];
-
-function resizeCanvas() {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-}
-
-function makeParticle() {
-    return {
-        x: Math.random() * canvas.width,
-        y: Math.random() * canvas.height,
-        vx: (Math.random() - 0.5) * 0.25,
-        vy: -(Math.random() * 0.4 + 0.1),
-        r: Math.random() * 1.4 + 0.4,
-        alpha: Math.random() * 0.45 + 0.08,
-        hue: Math.random() * 60 + 250,
-    };
-}
-
-function initParticles() {
-    particles = Array.from({ length: 90 }, makeParticle);
-}
-
-function tickParticles() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    for (const p of particles) {
-        p.x += p.vx;
-        p.y += p.vy;
-        if (p.y < -8) { p.y = canvas.height + 8; p.x = Math.random() * canvas.width; }
-        if (p.x < 0) p.x = canvas.width;
-        if (p.x > canvas.width) p.x = 0;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-        ctx.fillStyle = `hsla(${p.hue}, 80%, 72%, ${p.alpha})`;
-        ctx.fill();
-    }
-    requestAnimationFrame(tickParticles);
-}
-
-resizeCanvas();
-initParticles();
-tickParticles();
-window.addEventListener('resize', () => { resizeCanvas(); initParticles(); });
-
-// ── Confetti ─────────────────────────────────────────────────
-function launchConfetti() {
-    const colors = ['#a855f7', '#ec4899', '#06b6d4', '#f59e0b', '#22c55e', '#e2e8f0'];
-    for (let i = 0; i < 90; i++) {
-        const el = document.createElement('div');
-        el.className = 'confetti-piece';
-        const size = Math.random() * 9 + 5;
-        el.style.cssText = `
-            left: ${Math.random() * 100}vw;
-            top: -20px;
-            width: ${size}px;
-            height: ${size}px;
-            background: ${colors[Math.floor(Math.random() * colors.length)]};
-            border-radius: ${Math.random() > 0.5 ? '50%' : '2px'};
-            animation-duration: ${Math.random() * 2.2 + 1.8}s;
-            animation-delay: ${Math.random() * 0.6}s;
-        `;
-        document.body.appendChild(el);
-        el.addEventListener('animationend', () => el.remove());
-    }
-}
-
 // ── DOM refs ─────────────────────────────────────────────────
-const generateBtn  = document.getElementById('generateBtn');
-const imageDisplay = document.getElementById('imageDisplay');
-const messageEl    = document.getElementById('message');
-const timerEl      = document.getElementById('timer');
-const galleryEl    = document.getElementById('gallery');
-const totalCountEl = document.getElementById('totalCount');
+const foodInput   = document.getElementById('foodInput');
+const clearBtn    = document.getElementById('clearBtn');
+const generateBtn = document.getElementById('generateBtn');
+const chipsEl     = document.getElementById('chips');
+const noMatchEl   = document.getElementById('noMatch');
+const statusEl    = document.getElementById('status');
+const wallEl      = document.getElementById('gallery');
+const wallEmpty   = document.getElementById('wallEmpty');
+const countEl     = document.getElementById('totalCount');
+const tallyEl     = document.getElementById('tally');
+
 const lightbox     = document.getElementById('lightbox');
 const lightboxImg  = document.getElementById('lightboxImg');
+const lightboxFood = document.getElementById('lightboxFood');
 const lightboxDate = document.getElementById('lightboxDate');
+const lightboxDl   = document.getElementById('lightboxDl');
 
-// ── State ─────────────────────────────────────────────────────
+let gallery = [];
+let foods = [];                 // [{ name, emoji }] — サーバーから取得する
+const emojiOf = new Map();
+let selectedFood = '';          // 実際に送る値。リストにあるものしか入らない
 let isGenerating = false;
 let timerInterval = null;
-let gallery = [];
+let cooldownSeconds = 20;
 
-// ── Init ──────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
-    loadGallery();
-    checkStatus();
-    generateBtn.addEventListener('click', handleGenerate);
-    document.querySelector('.lightbox-backdrop').addEventListener('click', closeLightbox);
-    document.querySelector('.lightbox-close').addEventListener('click', closeLightbox);
-    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbox(); });
+// ── Init ─────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', async () => {
+  await loadFoods();
+  loadGallery();
+  checkStatus();
+
+  generateBtn.addEventListener('click', handleGenerate);
+  foodInput.addEventListener('input', onInput);
+  foodInput.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    // 入力中でも、候補が残っていれば先頭を選ぶ
+    const visible = [...chipsEl.querySelectorAll('.food:not(.is-hidden)')];
+    if (!selectedFood && visible.length) pickFood(visible[0].dataset.food);
+    if (!generateBtn.disabled) handleGenerate();
+  });
+  clearBtn.addEventListener('click', () => {
+    foodInput.value = '';
+    selectedFood = '';
+    onInput();
+    foodInput.focus();
+  });
+
+  document.querySelector('.lightbox-close').addEventListener('click', closeLightbox);
+  lightbox.addEventListener('click', e => { if (e.target === lightbox) closeLightbox(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbox(); });
 });
 
-// ── Gallery loading ───────────────────────────────────────────
+// ── たべもの ─────────────────────────────────────────────────
+async function loadFoods() {
+  try {
+    const res = await fetch('/api/foods');
+    const data = await res.json();
+    if (data.success && Array.isArray(data.foods)) foods = data.foods;
+  } catch { /* 取れなければ選択肢なしで動かす */ }
+
+  foods.forEach(f => emojiOf.set(f.name, f.emoji));
+  renderChips();
+}
+
+function renderChips() {
+  chipsEl.textContent = '';
+  foods.forEach(f => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'food';
+    btn.dataset.food = f.name;
+
+    const emoji = document.createElement('span');
+    emoji.className = 'food-emoji';
+    emoji.textContent = f.emoji;
+
+    const name = document.createElement('span');
+    name.textContent = f.name;
+
+    btn.append(emoji, name);
+    btn.addEventListener('click', () => pickFood(selectedFood === f.name ? '' : f.name));
+    chipsEl.appendChild(btn);
+  });
+}
+
+function pickFood(name) {
+  selectedFood = name;
+  foodInput.value = name;
+  clearBtn.classList.toggle('is-hidden', name === '');
+  filterChips();
+  if (statusEl.classList.contains('err')) setStatus('', '');
+}
+
+// 入力は「絞り込み」。リストにある語と完全一致したときだけ選択済みにする
+function onInput() {
+  const q = foodInput.value.trim();
+  clearBtn.classList.toggle('is-hidden', q === '');
+  selectedFood = foods.some(f => f.name === q) ? q : '';
+  filterChips();
+  if (statusEl.classList.contains('err')) setStatus('', '');
+}
+
+function filterChips() {
+  const q = foodInput.value.trim();
+  let visible = 0;
+  chipsEl.querySelectorAll('.food').forEach(chip => {
+    const name = chip.dataset.food;
+    const hit = q === '' || name.includes(q) || q.includes(name);
+    chip.classList.toggle('is-hidden', !hit);
+    chip.classList.toggle('selected', name === selectedFood);
+    if (hit) visible++;
+  });
+  noMatchEl.classList.toggle('is-hidden', visible > 0 || q === '');
+}
+
+// ── アルバム ─────────────────────────────────────────────────
 async function loadGallery() {
-    try {
-        const res = await fetch('/api/gallery');
-        const data = await res.json();
-        if (data.success && data.images) {
-            gallery = data.images;
-            renderGallery();
-        }
-    } catch {
-        loadFromStorage();
-    }
-}
-
-function saveToStorage(item) {
-    try {
-        let local = JSON.parse(localStorage.getItem('pandaGallery') || '[]');
-        local.unshift(item);
-        if (local.length > 20) local = local.slice(0, 20);
-        localStorage.setItem('pandaGallery', JSON.stringify(local));
-    } catch { /* storage full or unavailable */ }
-}
-
-function loadFromStorage() {
-    try {
-        const local = JSON.parse(localStorage.getItem('pandaGallery') || '[]');
-        if (local.length > 0) { gallery = local; renderGallery(); }
-    } catch { /* ignore */ }
-}
-
-// ── Render gallery ────────────────────────────────────────────
-function renderGallery() {
-    if (totalCountEl) totalCountEl.textContent = gallery.length;
-
-    if (gallery.length === 0) {
-        galleryEl.innerHTML = `
-            <div class="gallery-placeholder">
-                <p>まだレッサーパンダがいません</p>
-                <p class="sub">さいしょのレッサーパンダをつくってみよう！</p>
-            </div>`;
-        return;
-    }
-
-    galleryEl.innerHTML = gallery.map((item, i) => {
-        const dateStr = formatDate(item.createdAt || item.timestamp);
-        const delay = Math.min(i * 0.04, 0.6).toFixed(2);
-        return `<div class="gallery-item" style="animation-delay:${delay}s"
-                     onclick="openLightbox('${item.imageUrl}', '${dateStr}')">
-                    <img src="${item.imageUrl}" alt="レッサーパンダ" loading="lazy">
-                    <div class="gallery-item-overlay">${dateStr}</div>
-                </div>`;
-    }).join('');
+  try {
+    const res = await fetch('/api/gallery');
+    const data = await res.json();
+    if (data.success && data.images) gallery = data.images;
+  } catch { /* 取れなければ空のまま描く */ }
+  renderWall();
 }
 
 function formatDate(ts) {
-    const d = new Date(ts);
-    const m   = d.getMonth() + 1;
-    const day = d.getDate();
-    const h   = d.getHours();
-    const min = String(d.getMinutes()).padStart(2, '0');
-    return `${m}月${day}日 ${h}:${min}`;
+  const d = new Date(ts);
+  return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-// ── Lightbox ──────────────────────────────────────────────────
-function openLightbox(url, date) {
-    lightboxImg.src = url;
-    lightboxDate.textContent = date;
-    lightbox.classList.add('active');
-    lightbox.setAttribute('aria-hidden', 'false');
-    document.body.style.overflow = 'hidden';
+function tagTextFor(food) {
+  if (!food) return 'そのまま';
+  const emoji = emojiOf.get(food);
+  return emoji ? `${emoji} ${food}` : food;
+}
+
+// たべものは表示テキストなので innerHTML ではなく DOM API で組み立てる
+function buildTile(item, index) {
+  const dateStr = formatDate(item.createdAt || item.timestamp);
+  const food = item.food || '';
+
+  const tile = document.createElement('div');
+  tile.className = 'tile';
+  tile.style.animationDelay = `${Math.min(index * 0.035, 0.5).toFixed(2)}s`;
+  tile.tabIndex = 0;
+  const open = () => openLightbox(item.imageUrl, food, dateStr);
+  tile.addEventListener('click', open);
+  tile.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+  });
+
+  const img = document.createElement('img');
+  img.src = item.imageUrl;
+  img.alt = food ? `${food}を たべている レッサーパンダ` : 'レッサーパンダ';
+  img.loading = 'lazy';
+
+  const tag = document.createElement('span');
+  tag.className = 'tile-tag';
+  tag.textContent = tagTextFor(food);
+
+  tile.append(img, tag);
+  return tile;
+}
+
+function renderWall() {
+  countEl.textContent = gallery.length;
+  wallEl.textContent = '';
+  wallEmpty.classList.toggle('is-hidden', gallery.length > 0);
+
+  const frag = document.createDocumentFragment();
+  gallery.forEach((item, i) => frag.appendChild(buildTile(item, i)));
+  wallEl.appendChild(frag);
+}
+
+function prependTile(item) {
+  const tile = buildTile(item, 0);
+  wallEl.prepend(tile);
+  wallEmpty.classList.add('is-hidden');
+
+  countEl.textContent = gallery.length;
+  tallyEl.classList.remove('bump');
+  void tallyEl.offsetWidth;
+  tallyEl.classList.add('bump');
+}
+
+// 生成中はアルバムの先頭に仮のタイルを置いて、待ち時間を見えるようにする
+function addSkeleton(food) {
+  const sk = document.createElement('div');
+  sk.className = 'tile skeleton';
+  const label = document.createElement('span');
+  label.className = 'skeleton-label';
+  label.textContent = food ? `${food} を たべてるところ…` : 'つくって います…';
+  sk.appendChild(label);
+  wallEl.prepend(sk);
+  wallEmpty.classList.add('is-hidden');
+  return sk;
+}
+
+// ── ライトボックス ───────────────────────────────────────────
+function openLightbox(url, food, date) {
+  lightboxImg.src = url;
+  lightboxFood.textContent = tagTextFor(food);
+  lightboxDate.textContent = date;
+  lightboxDl.href = url;
+  lightbox.classList.add('active');
+  lightbox.setAttribute('aria-hidden', 'false');
+  document.body.style.overflow = 'hidden';
 }
 
 function closeLightbox() {
-    lightbox.classList.remove('active');
-    lightbox.setAttribute('aria-hidden', 'true');
-    document.body.style.overflow = '';
+  lightbox.classList.remove('active');
+  lightbox.setAttribute('aria-hidden', 'true');
+  document.body.style.overflow = '';
 }
 
-// ── Status check ──────────────────────────────────────────────
+// ── ステータス ───────────────────────────────────────────────
+function setStatus(text, kind) {
+  statusEl.textContent = text;
+  statusEl.className = `status ${kind || ''}`;
+}
+
 async function checkStatus() {
-    try {
-        const res = await fetch('/api/can-generate');
-        const data = await res.json();
-        data.canGenerate ? enableBtn() : startTimer(data.remainingTime);
-    } catch {
-        checkStatusLocal();
-    }
-}
-
-function checkStatusLocal() {
-    const last = localStorage.getItem('lastGenTime');
-    if (last) {
-        const elapsed = Date.now() - parseInt(last);
-        if (elapsed < 60_000) { startTimer(Math.ceil((60_000 - elapsed) / 1000)); return; }
-    }
+  try {
+    const res = await fetch('/api/can-generate');
+    const data = await res.json();
+    if (data.cooldownSeconds) cooldownSeconds = data.cooldownSeconds;
+    if (data.canGenerate) enableBtn();
+    else startTimer(data.remainingTime || cooldownSeconds);
+  } catch {
     enableBtn();
+  }
 }
 
-// ── Generate ──────────────────────────────────────────────────
+// ── つくる ───────────────────────────────────────────────────
 async function handleGenerate() {
-    if (isGenerating) return;
-    isGenerating = true;
+  if (isGenerating) return;
 
-    generateBtn.disabled = true;
-    generateBtn.classList.add('is-loading');
-    imageDisplay.classList.add('is-loading');
-    showMessage('AIがレッサーパンダをつくっています...', 'info');
+  // 入力があるのにリストと一致していないときは投げない
+  const typed = foodInput.value.trim();
+  if (typed && !selectedFood) {
+    setStatus('その たべものは まだ ないみたい。したから えらんでね', 'err');
+    return;
+  }
 
-    try {
-        const res = await fetch('/api/generate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.message || 'つくれませんでした');
+  isGenerating = true;
+  const food = selectedFood;
 
-        if (data.imageUrl) {
-            displayImage(data.imageUrl);
-            showMessage('✨ できた！かわいいレッサーパンダだね！', 'success');
-            launchConfetti();
+  generateBtn.disabled = true;
+  generateBtn.classList.add('is-busy');
+  setStatus(food ? `「${food}」を たべてる レッサーパンダを つくって います…` : 'レッサーパンダを つくって います…', '');
 
-            const item = data.galleryItem || {
-                id: String(Date.now()),
-                imageUrl: data.imageUrl,
-                timestamp: data.timestamp || Date.now(),
-                createdAt: new Date().toISOString(),
-            };
-            gallery.unshift(item);
-            saveToStorage(item);
-            renderGallery();
+  const skeleton = addSkeleton(food);
 
-            localStorage.setItem('lastGenTime', String(Date.now()));
-            startTimer(60);
-        } else {
-            throw new Error('うまくつくれませんでした');
-        }
-    } catch (err) {
-        showMessage(err.message || 'エラーがでちゃった...', 'error');
-        enableBtn();
-    } finally {
-        isGenerating = false;
-        generateBtn.classList.remove('is-loading');
-        imageDisplay.classList.remove('is-loading');
-    }
+  try {
+    const res = await fetch('/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ food }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || 'つくれませんでした');
+    if (!data.imageUrl) throw new Error('うまく つくれませんでした');
+
+    const item = data.galleryItem || {
+      id: String(Date.now()),
+      imageUrl: data.imageUrl,
+      timestamp: data.timestamp || Date.now(),
+      createdAt: new Date().toISOString(),
+      food,
+    };
+
+    skeleton.remove();
+    gallery.unshift(item);
+    prependTile(item);
+    setStatus('できた！つづけて つくれるよ', 'ok');
+    startTimer(cooldownSeconds);
+  } catch (err) {
+    skeleton.remove();
+    setStatus(err.message || 'エラーが でちゃった…', 'err');
+    enableBtn();
+  } finally {
+    isGenerating = false;
+    generateBtn.classList.remove('is-busy');
+  }
 }
 
-function displayImage(url) {
-    const date = formatDate(Date.now());
-    imageDisplay.innerHTML = `
-        <img src="${url}" alt="AIが生成したレッサーパンダ" class="generated-image"
-             onclick="openLightbox('${url}', '${date}')">`;
-}
-
-// ── Timer ─────────────────────────────────────────────────────
+// ── まちじかん ───────────────────────────────────────────────
 function startTimer(seconds) {
-    let remaining = seconds;
-    generateBtn.disabled = true;
-    timerEl.classList.remove('timer-hidden');
-    timerEl.textContent = `つくるまで: ${remaining}びょう`;
+  let remaining = seconds;
+  const label = generateBtn.querySelector('.make-label');
+  generateBtn.disabled = true;
+  label.textContent = `あと ${remaining}びょう`;
 
-    if (timerInterval) clearInterval(timerInterval);
-    timerInterval = setInterval(() => {
-        remaining--;
-        if (remaining <= 0) {
-            clearInterval(timerInterval);
-            timerInterval = null;
-            timerEl.classList.add('timer-hidden');
-            enableBtn();
-        } else {
-            timerEl.textContent = `つくるまで: ${remaining}びょう`;
-        }
-    }, 1000);
+  if (timerInterval) clearInterval(timerInterval);
+  timerInterval = setInterval(() => {
+    remaining--;
+    if (remaining <= 0) {
+      clearInterval(timerInterval);
+      timerInterval = null;
+      enableBtn();
+    } else {
+      label.textContent = `あと ${remaining}びょう`;
+    }
+  }, 1000);
 }
 
 function enableBtn() {
-    generateBtn.disabled = false;
-    timerEl.classList.add('timer-hidden');
-    if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
-}
-
-// ── Messages ──────────────────────────────────────────────────
-function showMessage(text, type) {
-    messageEl.textContent = text;
-    messageEl.className = `message ${type}`;
-    if (type === 'success' || type === 'error') {
-        setTimeout(() => { messageEl.className = 'message msg-hidden'; }, 5000);
-    }
+  generateBtn.disabled = false;
+  generateBtn.querySelector('.make-label').textContent = 'つくる！';
+  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
 }

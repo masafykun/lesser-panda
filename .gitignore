@@ -1,10 +1,20 @@
-# Environment
+# 秘密情報
 .env
+.env.*
+!.env.example
 
-# Dependencies
-api/node_modules/
+# バックアップ（*.bak だけではハイフン付き .bak-20260729 に当たらない）
+*.bak
+*.bak-*
+*.old
+*.orig
 
-# AI-generated images (large files, not for version control)
-frontend/images/generated/*.png
-frontend/images/generated/*.jpg
-frontend/images/generated/*.webp
+# 実行時に生成されるもの
+node_modules/
+frontend/images/generated/
+meta.json
+*.log
+*.tgz
+
+# 運用メモ（サーバー内部の構成が書いてあるため公開しない）
+OPERATIONS.md

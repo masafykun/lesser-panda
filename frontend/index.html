@@ -3,86 +3,79 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>レッサーパンダ.jp — AIがつくりだすレッサーパンダ</title>
+    <title>レッサーパンダ.jp — すきなたべものを たべる レッサーパンダを つくろう</title>
+    <meta name="description" content="すきなたべものをえらぶと、それを食べているレッサーパンダの絵をAIがつくります。つくった絵はどんどん増えていきます。">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <div class="orbs" aria-hidden="true">
-        <div class="orb orb-1"></div>
-        <div class="orb orb-2"></div>
-        <div class="orb orb-3"></div>
+    <div class="sky" aria-hidden="true">
+        <span class="blob blob-1"></span>
+        <span class="blob blob-2"></span>
+        <span class="blob blob-3"></span>
     </div>
 
-    <canvas id="particleCanvas" aria-hidden="true"></canvas>
+    <header class="head">
+        <div class="logo">
+            <span class="logo-main">レッサーパンダ</span><span class="logo-tld">.jp</span>
+        </div>
+        <div class="tally" id="tally">
+            いままで <b id="totalCount">0</b> ひき
+        </div>
+    </header>
 
-    <div class="container">
-        <header class="header">
-            <div class="logo">
-                <div class="logo-icon">🦝</div>
-                <div class="logo-text">
-                    <h1>レッサーパンダ<span class="logo-jp">.jp</span></h1>
-                    <p class="logo-tagline">AIがつくりだすたったひとつだけのレッサーパンダ</p>
-                </div>
+    <main>
+        <section class="maker">
+            <h1 class="ask">きょうは なにを たべる？</h1>
+            <p class="ask-sub">すきな たべものを えらんでね</p>
+
+            <div class="search-row">
+                <span class="search-icon" aria-hidden="true">🔎</span>
+                <input id="foodInput" class="search" type="text" maxlength="24"
+                       placeholder="さがす（れい：りんご）" autocomplete="off" aria-label="たべものをさがす">
+                <button id="clearBtn" class="clear is-hidden" type="button" aria-label="けす">✕</button>
             </div>
-            <div class="header-badge">
-                <span class="badge-dot"></span>
-                <span id="totalCount">0</span>&thinsp;匹のパンダが誕生
+
+            <div class="foods-box">
+                <div class="foods" id="chips" role="group" aria-label="えらべるたべもの"></div>
+                <span class="foods-fade" aria-hidden="true"></span>
             </div>
-        </header>
+            <p class="no-match is-hidden" id="noMatch">その たべものは まだ ないみたい</p>
 
-        <main>
-            <section class="generator">
-                <div class="glass-card generator-card">
-                    <div class="card-label">✦ GENERATE</div>
-                    <h2 class="card-title">あなただけのレッサーパンダをつくろう</h2>
+            <button id="generateBtn" class="make" type="button">
+                <span class="make-label">つくる！</span>
+                <span class="make-spinner" aria-hidden="true"></span>
+            </button>
 
-                    <div class="image-frame" id="imageDisplay">
-                        <div class="placeholder">
-                            <div class="placeholder-panda">🦝</div>
-                            <p>ボタンをおしてレッサーパンダをつくってね</p>
-                        </div>
-                    </div>
+            <p class="status" id="status" aria-live="polite"></p>
+        </section>
 
-                    <div class="controls">
-                        <button id="generateBtn" class="generate-btn">
-                            <span class="btn-shimmer"></span>
-                            <span class="btn-content">
-                                <span class="btn-icon">✨</span>
-                                <span>つくろう！</span>
-                            </span>
-                        </button>
-                        <div class="status-area">
-                            <div id="message" class="message msg-hidden"></div>
-                            <div id="timer" class="timer timer-hidden"></div>
-                        </div>
-                    </div>
-                </div>
-            </section>
+        <section class="album">
+            <h2 class="album-title">できた レッサーパンダ</h2>
+            <div class="wall" id="gallery"></div>
+            <p class="wall-empty is-hidden" id="wallEmpty">
+                まだ 1ぴきも いません。<br>たべものを えらんで「つくる！」を おしてね。
+            </p>
+        </section>
+    </main>
 
-            <section class="gallery-section">
-                <div class="section-header">
-                    <div class="section-label">✦ GALLERY</div>
-                    <h2 class="section-title">いままでつくったレッサーパンダ</h2>
-                </div>
-                <div id="gallery" class="gallery-grid"></div>
-            </section>
-        </main>
-
-        <footer class="footer">
-            <p>🦝 レッサーパンダ.jp — Powered by AI &amp; OpenAI DALL·E 3</p>
-            <p class="footer-small">© 2026</p>
-        </footer>
-    </div>
+    <footer>
+        <p>レッサーパンダ.jp</p>
+        <p class="dim">えは AI（FLUX.1 [schnell] / Cloudflare Workers AI）が つくっています</p>
+        <p><a href="https://masafy.org" target="_blank" rel="noopener">masafy.org</a></p>
+    </footer>
 
     <div id="lightbox" class="lightbox" role="dialog" aria-modal="true" aria-hidden="true">
-        <div class="lightbox-backdrop"></div>
-        <div class="lightbox-content">
-            <button class="lightbox-close" aria-label="閉じる">×</button>
-            <img id="lightboxImg" src="" alt="レッサーパンダ">
-            <div id="lightboxDate" class="lightbox-date"></div>
+        <button class="lightbox-close" type="button" aria-label="とじる">✕</button>
+        <div class="lightbox-inner">
+            <img id="lightboxImg" src="" alt="AIがつくった レッサーパンダ">
+            <div class="lightbox-bar">
+                <span id="lightboxFood" class="lb-food"></span>
+                <span id="lightboxDate" class="lb-date"></span>
+                <a id="lightboxDl" class="lb-dl" href="#" download>ほぞん</a>
+            </div>
         </div>
     </div>
 
