@@ -56,7 +56,7 @@ const FOODS = [
   ['さつまいも', '🍠', 'a roasted sweet potato'],
   ['じゃがいも', '🥔', 'a potato'],
   ['かぼちゃ', '🎃', 'a pumpkin'],
-  ['なす', '🍆', 'an eggplant'],
+  ['なす', '🍆', 'fresh eggplants'],
   ['ピーマン', '🫑', 'a green bell pepper'],
   ['ブロッコリー', '🥦', 'broccoli'],
   ['キャベツ', '🥬', 'a cabbage leaf'],
@@ -189,13 +189,30 @@ function normalizeFood(raw) {
   throw new Error('food is not in the allowed list');
 }
 
-function buildPrompt(foodEn) {
+// ⚠️ Cloudflare の NSFW 判定は食べもの名と言い回しの組み合わせで誤検知する。
+//    実測（2026-08-24）:
+//      「holding it in both front paws」→ きゅうり・バナナが弾かれる
+//      「eating」を含む言い回し全般      → なす・ホットドッグが弾かれる
+//    そこで段階的に無難な文面へ落とす。0 が一番絵として良く、後ろほど安全。
+const PROMPT_VARIANTS = [
+  (foodEn) =>
+    `It is happily eating ${foodEn}, its front paws resting on it. The ${foodEn} is clearly visible and in focus. `,
+  (foodEn) =>
+    `${foodEn.charAt(0).toUpperCase() + foodEn.slice(1)} is placed beside it, clearly visible and in focus. `,
+  // 最後の手段。食べものを出さずにパンダだけ描く。絵としては物足りないが、
+  // 「つくれませんでした」で終わるよりはよい。
+  () => 'It looks happily at the camera. ',
+];
+
+function buildPrompt(foodEn, variant = 0) {
   if (!foodEn) return PROMPT_BASE + PROMPT_TAIL;
-  return (
-    PROMPT_BASE +
-    `It is happily eating ${foodEn}, holding it in both front paws. The ${foodEn} is clearly visible and in focus. ` +
-    PROMPT_TAIL
-  );
+  const make = PROMPT_VARIANTS[Math.min(variant, PROMPT_VARIANTS.length - 1)];
+  return PROMPT_BASE + make(foodEn) + PROMPT_TAIL;
+}
+
+// NSFW 判定で弾かれたかどうか（Workers AI のエラーコード 8007）
+function isNsfwRejection(err) {
+  return /8007|NSFW/i.test(String(err && err.message));
 }
 
 // 拡張子はモデルの出力次第で変わるのでマジックバイトから判定する
@@ -263,7 +280,9 @@ async function generateImage(prompt) {
     body: JSON.stringify({
       prompt,
       steps: CF_STEPS,
-      seed: Math.floor(Math.random() * 2 ** 31),
+      // ⚠️ seed は送らない。2026-08-24 に Cloudflare 側のスキーマが厳格化され、
+      //    prompt / steps 以外を弾くようになった（AiError 5006）。
+      //    seed 無しでも毎回違う絵が出ることは実測で確認済み。
     }),
     signal: AbortSignal.timeout(120_000),
   });
@@ -346,7 +365,22 @@ app.post('/api/generate', async (req, res) => {
   inFlight++;
 
   try {
-    const buf = await generateImage(buildPrompt(foodEn));
+    // ⚠️ NSFW 誤判定は食べもの名によって出る。弾かれたら言い換えて1回だけ再挑戦する。
+    //    ここで諦めると「つくれませんでした」しか出せず、利用者には理由が分からない。
+    let buf;
+    try {
+      buf = await generateImage(buildPrompt(foodEn, 0));
+    } catch (err) {
+      if (!isNsfwRejection(err)) throw err;
+      console.warn(`NSFW判定のため言い換えて再挑戦: ${foodEn}`);
+      try {
+        buf = await generateImage(buildPrompt(foodEn, 1));
+      } catch (err2) {
+        if (!isNsfwRejection(err2)) throw err2;
+        console.warn(`再挑戦も弾かれたので食べもの無しで生成: ${foodEn}`);
+        buf = await generateImage(buildPrompt(foodEn, 2));
+      }
+    }
     const ext = detectExtension(buf);
     if (ext === 'bin') throw new Error('Unknown image format returned by Workers AI');
 
